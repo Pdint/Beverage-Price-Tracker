@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 이커머스 음료 최저가 분석기 (Flet + DuckDB)
-- 완벽 스크롤 및 드롭다운 메뉴 높이 제한 적용 버전
 """
 
 import flet as ft
@@ -31,8 +30,6 @@ def main(page: ft.Page) -> None:
     page.padding = 30
     page.window.width = 1200 
     page.window.height = 750
-    
-    # ⭐ [핵심 추가] 페이지 전체에 위아래(수직) 스크롤 활성화! (데이터가 많아져도 무한 스크롤 가능)
     page.scroll = ft.ScrollMode.AUTO 
 
     # =========================================================================
@@ -105,49 +102,80 @@ def main(page: ft.Page) -> None:
                         ft.DataCell(ft.Image(src=f"/{row['image_path']}", width=50, height=50)),
                         ft.DataCell(ft.Text(row['product_name'])),
                         ft.DataCell(ft.Text(row['platform_name'])),
-                        ft.DataCell(ft.Text(row['promo_name'], color=ft.Colors.BLUE_700 if has_promo else None)),
+                        ft.DataCell(ft.Text(row['promo_name'], color=ft.Colors.BLUE_700 if has_promo else None)), 
                         ft.DataCell(ft.Text(f"{row['discount_price']:,}원 (적립: {row['reward']:,})")),
                         ft.DataCell(ft.Text(f"{row['can_count']}캔")),
                         ft.DataCell(ft.Text(f"{row['final_price']:,}원")),
                         ft.DataCell(ft.Text(f"{row['unit_price']:,}원", weight=ft.FontWeight.BOLD, color=ft.Colors.RED_700, size=16)),
-                        ft.DataCell(ft.Text(str(row['record_date']))),
+                        ft.DataCell(ft.Text(str(row['record_date'])[:10])),
                     ], color=bg_color
                 )
             )
         page.update()
 
     # =========================================================================
-    # [뷰 2] 데이터 적재 (관리자)
+    # [뷰 2] 데이터 적재 (관리자) - 업그레이드됨!
     # =========================================================================
     def show_toast(msg):
         page.snack_bar = ft.SnackBar(ft.Text(msg), show_close_icon=True)
         page.snack_bar.open = True
         page.update()
 
-    prod_name = ft.TextField(label="신규 상품명 입력", expand=True)
+    # 1. 음료 등록 필드 (이미지, 용량 추가)
+    prod_name = ft.TextField(label="신규 상품명 입력", width=250)
+    prod_vol = ft.TextField(label="용량 (예: 355ml)", width=120)
+    prod_img = ft.TextField(label="이미지 파일명 (예: coke.png)", width=250)
     
     def insert_product(e):
         if not prod_name.value: return show_toast("상품명은 필수입니다.")
+        img_path = prod_img.value if prod_img.value else "default.png"
         con = duckdb.connect(DB_FILE)
         try:
             next_id = con.execute("SELECT COALESCE(MAX(product_id), 0) + 1 FROM Products").fetchone()[0]
-            con.execute("INSERT INTO Products (product_id, product_name, image_path) VALUES (?, ?, 'default.png')", [next_id, prod_name.value])
+            con.execute("INSERT INTO Products (product_id, product_name, volume, image_path) VALUES (?, ?, ?, ?)", 
+                        [next_id, prod_name.value, prod_vol.value, img_path])
             con.commit()
             show_toast(f"음료 [{prod_name.value}] 등록 성공!")
-            prod_name.value = ""
+            prod_name.value = ""; prod_vol.value = ""; prod_img.value = ""
             load_dropdowns() 
         except Exception as ex:
             show_toast(f"등록 실패: {ex}")
         finally:
             con.close()
 
-    # ⭐ [핵심 추가] max_menu_height=250 을 추가하여 드롭다운 내부에 스크롤바가 생기도록 강제 제한!
+    # 2. 프로모션 등록 필드 (신규 추가)
+    promo_name = ft.TextField(label="행사명 입력", width=250)
+    promo_plat_dropdown = ft.Dropdown(label="플랫폼 선택 ▼", width=200, menu_height=250)
+    promo_start = ft.TextField(label="시작일(YYYY-MM-DD)", value="2026-06-01", width=180)
+    promo_end = ft.TextField(label="종료일(YYYY-MM-DD)", value="2026-06-15", width=180)
+    promo_disc = ft.TextField(label="할인율(예: 0.15)", width=130)
+    promo_rew = ft.TextField(label="적립률(예: 0.05)", width=130)
+
+    def insert_promotion(e):
+        if not promo_name.value or not promo_plat_dropdown.value: return show_toast("행사명과 플랫폼은 필수입니다.")
+        con = duckdb.connect(DB_FILE)
+        try:
+            next_id = con.execute("SELECT COALESCE(MAX(promo_id), 0) + 1 FROM Promotions").fetchone()[0]
+            disc = float(promo_disc.value) if promo_disc.value else 0.0
+            rew = float(promo_rew.value) if promo_rew.value else 0.0
+            con.execute("INSERT INTO Promotions (promo_id, platform_id, promo_name, start_date, end_date, discount_rate, reward_points_rate) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        [next_id, int(promo_plat_dropdown.value), promo_name.value, promo_start.value, promo_end.value, disc, rew])
+            con.commit()
+            show_toast(f"행사 [{promo_name.value}] 등록 성공!")
+            promo_name.value = ""; promo_disc.value = ""; promo_rew.value = ""
+            load_dropdowns() # 등록된 행사가 '가격 적재'의 드롭다운에 바로 뜨도록 새로고침
+        except Exception as ex:
+            show_toast(f"등록 실패: {ex}")
+        finally:
+            con.close()
+
+    # 3. 가격 이력 적재 필드 (행사 드롭다운 추가)
     rec_prod_dropdown = ft.Dropdown(label="음료 선택 ▼", width=250, menu_height=250)
     rec_plat_dropdown = ft.Dropdown(label="플랫폼 선택 ▼", width=200, menu_height=250)
-    
+    rec_promo_dropdown = ft.Dropdown(label="적용 행사(선택) ▼", width=200, menu_height=250)
     rec_can = ft.TextField(label="수량(캔)", width=100) 
     rec_price = ft.TextField(label="원가(원)", width=120)
-    rec_date = ft.TextField(label="날짜(YYYY-MM-DD)", value="2026-05-10", width=160)
+    rec_date = ft.TextField(label="날짜(YYYY-MM-DD)", value="2026-06-05", width=160)
 
     def load_dropdowns():
         if not os.path.exists(DB_FILE): return
@@ -157,19 +185,28 @@ def main(page: ft.Page) -> None:
         rec_prod_dropdown.options = [ft.dropdown.Option(key=str(p[0]), text=p[1]) for p in prods]
         
         plats = con.execute("SELECT platform_id, platform_name FROM Platforms").fetchall()
-        rec_plat_dropdown.options = [ft.dropdown.Option(key=str(p[0]), text=p[1]) for p in plats]
+        plat_options = [ft.dropdown.Option(key=str(p[0]), text=p[1]) for p in plats]
+        rec_plat_dropdown.options = plat_options
+        promo_plat_dropdown.options = plat_options # 프로모션 등록용 플랫폼 목록도 채워줌
+        
+        promos = con.execute("SELECT promo_id, promo_name FROM Promotions").fetchall()
+        # 행사는 없을 수도 있으므로 '행사 없음(NULL)' 옵션을 맨 위에 추가
+        rec_promo_dropdown.options = [ft.dropdown.Option(key="NULL", text="행사 없음 (평상시)")] + [ft.dropdown.Option(key=str(p[0]), text=p[1]) for p in promos]
         
         con.close()
         page.update()
 
     def insert_record(e):
         if not rec_prod_dropdown.value or not rec_plat_dropdown.value or not rec_price.value or not rec_can.value: 
-            return show_toast("모든 칸을 입력하세요.")
+            return show_toast("필수 칸을 모두 입력하세요.")
         con = duckdb.connect(DB_FILE)
         try:
             next_rec_id = con.execute("SELECT COALESCE(MAX(record_id), 0) + 1 FROM Price_Records").fetchone()[0]
-            con.execute("INSERT INTO Price_Records (record_id, product_id, platform_id, promo_id, base_price, can_count, record_date) VALUES (?, ?, ?, NULL, ?, ?, ?)", 
-                        [next_rec_id, int(rec_prod_dropdown.value), int(rec_plat_dropdown.value), int(rec_price.value), int(rec_can.value), rec_date.value])
+            # '행사 없음'을 선택했으면 NULL로, 아니면 해당 ID로 변환
+            p_id = None if rec_promo_dropdown.value in (None, "NULL") else int(rec_promo_dropdown.value)
+            
+            con.execute("INSERT INTO Price_Records (record_id, product_id, platform_id, promo_id, base_price, can_count, record_date) VALUES (?, ?, ?, ?, ?, ?, ?)", 
+                        [next_rec_id, int(rec_prod_dropdown.value), int(rec_plat_dropdown.value), p_id, int(rec_price.value), int(rec_can.value), rec_date.value])
             con.commit()
             show_toast("가격 이력 적재 성공!")
             rec_price.value = ""; rec_can.value = "" 
@@ -189,11 +226,11 @@ def main(page: ft.Page) -> None:
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
             ft.Divider(),
             ft.Row([search_input, ft.ElevatedButton("최저가 검색", on_click=lambda e: update_dashboard(), icon=ft.Icons.SEARCH)]),
-            # ⭐ 열(가로 항목)이 모니터를 넘어가면 무조건 가로 스크롤 생성
             ft.Row([data_table], scroll=ft.ScrollMode.ALWAYS) 
         ])
     )
 
+    # 관리자 화면 레이아웃 (섹션별로 깔끔하게 정리)
     admin_view = ft.Container(
         visible=False,
         content=ft.Column([
@@ -202,11 +239,19 @@ def main(page: ft.Page) -> None:
                 ft.TextButton("◀ 대시보드로 복귀", on_click=lambda e: switch_view(True))
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
             ft.Divider(),
+            
             ft.Text("▣ 신규 음료 등록 (Products)", weight=ft.FontWeight.BOLD),
-            ft.Row([prod_name, ft.ElevatedButton("음료 등록", on_click=insert_product, color=ft.Colors.GREEN_800)]),
-            ft.Container(height=20),
+            ft.Row([prod_name, prod_vol, prod_img, ft.ElevatedButton("음료 등록", on_click=insert_product, color=ft.Colors.GREEN_800)]),
+            ft.Container(height=10),
+            
+            ft.Text("▣ 신규 프로모션 등록 (Promotions)", weight=ft.FontWeight.BOLD),
+            ft.Row([promo_name, promo_plat_dropdown, promo_start, promo_end]),
+            ft.Row([promo_disc, promo_rew, ft.ElevatedButton("프로모션 등록", on_click=insert_promotion, color=ft.Colors.ORANGE_800)]),
+            ft.Container(height=10),
+            
             ft.Text("▣ 일별 가격 적재 (Price_Records)", weight=ft.FontWeight.BOLD),
-            ft.Row([rec_prod_dropdown, rec_plat_dropdown, rec_can, rec_price, rec_date, ft.ElevatedButton("가격 적재", on_click=insert_record, color=ft.Colors.BLUE_800)]),
+            ft.Row([rec_prod_dropdown, rec_plat_dropdown, rec_promo_dropdown]),
+            ft.Row([rec_can, rec_price, rec_date, ft.ElevatedButton("가격 적재", on_click=insert_record, color=ft.Colors.BLUE_800)]),
         ])
     )
 

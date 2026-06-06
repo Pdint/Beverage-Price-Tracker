@@ -36,15 +36,8 @@
  ┗ 📜 README.md               # 프로젝트 명세서
 
  ---
-```
+```   
 
 ### 🚀 2. GitHub 릴리즈(Release) 진행 가이드
 
 프로젝트 평가 요구사항인 **"(5) GitHub Public Repository 증빙"**을 완벽하게 마무리하기 위한 단계입니다.
-
-**Step 1: 로컬 폴더를 GitHub에 Push 하기**
-1. 작업하시던 폴더에서 터미널을 열고 깃 초기화 및 커밋을 진행합니다.
-   ```bash
-   git init
-   git add .
-   git commit -m "feat: Term Project Final Submission"
